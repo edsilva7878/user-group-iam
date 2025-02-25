@@ -40,21 +40,18 @@ jobs:
       - name: Configure AWS credentials
         run: |
           mkdir -p ~/.aws
-          
           cat > ~/.aws/credentials << EOF
           [${AWS_SOURCE_PROFILE}]
           aws_access_key_id=${AWS_ACCESS_KEY_ID}
           aws_secret_access_key=${AWS_SECRET_ACCESS_KEY}
           aws_session_token=${AWS_SESSION_TOKEN}
           EOF
-          
           cat > ~/.aws/config << EOF
           [profile terraform]
           role_arn = ${AWS_ROLE_ARN}
           source_profile = ${AWS_SOURCE_PROFILE}
           region = ${AWS_REGION}
           EOF
-          
           export AWS_PROFILE=terraform
           aws sts get-caller-identity
       
@@ -64,7 +61,6 @@ jobs:
           echo 'Iniciando job init....'
           terraform init -reconfigure
           echo 'Terraform inicializado com sucesso!'
-          echo 'Job init concluído'
       
       - name: Terraform Validate
         id: validate
@@ -83,7 +79,7 @@ jobs:
       
       - name: Save Plan Artifact
         if: github.event.inputs.action != 'destroy'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: terraform-plan
           path: plan.out
@@ -99,7 +95,7 @@ jobs:
       
       - name: Save State and Credentials Artifacts
         if: github.ref == 'refs/heads/main' && github.event.inputs.action != 'destroy' && github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: terraform-results
           path: |
@@ -134,26 +130,23 @@ jobs:
       - name: Configure AWS credentials
         run: |
           mkdir -p ~/.aws
-          
           cat > ~/.aws/credentials << EOF
           [${AWS_SOURCE_PROFILE}]
           aws_access_key_id=${AWS_ACCESS_KEY_ID}
           aws_secret_access_key=${AWS_SECRET_ACCESS_KEY}
           aws_session_token=${AWS_SESSION_TOKEN}
           EOF
-          
           cat > ~/.aws/config << EOF
           [profile terraform]
           role_arn = ${AWS_ROLE_ARN}
           source_profile = ${AWS_SOURCE_PROFILE}
           region = ${AWS_REGION}
           EOF
-          
           export AWS_PROFILE=terraform
           aws sts get-caller-identity
       
       - name: Download previous state
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: terraform-results
           path: .
@@ -169,7 +162,7 @@ jobs:
           echo 'Destroy concluído'
       
       - name: Save State after Destroy
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: terraform-state-after-destroy
           path: terraform.tfstate
