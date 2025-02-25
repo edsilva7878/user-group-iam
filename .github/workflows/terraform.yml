@@ -2,76 +2,175 @@ name: Terraform Pipeline
 
 on:
   push:
-    branches:
-      - main  # Isso garante que o workflow só será acionado quando houver um push na branch main
-  workflow_dispatch:  # Isso ainda permitirá que você execute manualmente, se necessário
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Ação manual (destroy)'
+        required: true
+        default: 'none'
+        type: choice
+        options:
+          - none
+          - destroy
 
 jobs:
   terraform:
     runs-on: ubuntu-latest
-
+    container:
+      image: hashicorp/terraform:1.6.6
+    env:
+      AWS_ROLE_ARN: "arn:aws:iam::901392891750:role/embratel.atendimento"
+      AWS_SOURCE_PROFILE: "601156111743_embratel.atendimento"
+      AWS_REGION: "us-east-1"
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Install AWS CLI
+        run: |
+          apk add --no-cache aws-cli curl
+      
+      - name: Configure AWS credentials
+        run: |
+          mkdir -p ~/.aws
+          
+          cat > ~/.aws/credentials << EOF
+          [${AWS_SOURCE_PROFILE}]
+          aws_access_key_id=${AWS_ACCESS_KEY_ID}
+          aws_secret_access_key=${AWS_SECRET_ACCESS_KEY}
+          aws_session_token=${AWS_SESSION_TOKEN}
+          EOF
+          
+          cat > ~/.aws/config << EOF
+          [profile terraform]
+          role_arn = ${AWS_ROLE_ARN}
+          source_profile = ${AWS_SOURCE_PROFILE}
+          region = ${AWS_REGION}
+          EOF
+          
+          export AWS_PROFILE=terraform
+          aws sts get-caller-identity
+      
+      - name: Terraform Init
+        id: init
+        run: |
+          echo 'Iniciando job init....'
+          terraform init -reconfigure
+          echo 'Terraform inicializado com sucesso!'
+          echo 'Job init concluído'
+      
+      - name: Terraform Validate
+        id: validate
+        run: |
+          echo 'Iniciando validate'
+          terraform validate
+          echo 'Validate concluído'
+      
+      - name: Terraform Plan
+        id: plan
+        if: github.event.inputs.action != 'destroy'
+        run: |
+          echo 'Iniciando plan'
+          terraform plan -out=plan.out
+          echo 'Plan concluído'
+      
+      - name: Save Plan Artifact
+        if: github.event.inputs.action != 'destroy'
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-plan
+          path: plan.out
+          retention-days: 1
+      
+      - name: Terraform Apply
+        id: apply
+        if: github.ref == 'refs/heads/main' && github.event.inputs.action != 'destroy' && github.event_name != 'pull_request'
+        run: |
+          echo 'Iniciando apply'
+          terraform apply -auto-approve plan.out
+          echo 'Apply concluído'
+      
+      - name: Save State and Credentials Artifacts
+        if: github.ref == 'refs/heads/main' && github.event.inputs.action != 'destroy' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-results
+          path: |
+            terraform.tfstate
+            credentials.csv
+          retention-days: 1
+  
+  destroy:
+    runs-on: ubuntu-latest
+    needs: terraform
+    if: github.event.inputs.action == 'destroy' && github.ref == 'refs/heads/main'
+    container:
+      image: hashicorp/terraform:1.6.6
     environment:
       name: production
-
+    env:
+      AWS_ROLE_ARN: "arn:aws:iam::901392891750:role/embratel.atendimento"
+      AWS_SOURCE_PROFILE: "601156111743_embratel.atendimento"
+      AWS_REGION: "us-east-1"
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+    
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v2
-
-    - name: Set up Terraform
-      uses: hashicorp/setup-terraform@v1
-      with:
-        terraform_version: 1.6.6
-
-    - name: Configure AWS credentials
-      run: |
-        mkdir -p ~/.aws
-        echo "[${{ secrets.AWS_SOURCE_PROFILE }}]" > ~/.aws/credentials
-        echo "aws_access_key_id=${{ secrets.AWS_ACCESS_KEY_ID }}" >> ~/.aws/credentials
-        echo "aws_secret_access_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> ~/.aws/credentials
-        echo "aws_session_token=${{ secrets.AWS_SESSION_TOKEN }}" >> ~/.aws/credentials
-
-        echo "[profile terraform]" > ~/.aws/config
-        echo "role_arn = ${{ secrets.AWS_ROLE_ARN }}" >> ~/.aws/config
-        echo "source_profile = ${{ secrets.AWS_SOURCE_PROFILE }}" >> ~/.aws/config
-        echo "region = us-east-1" >> ~/.aws/config
-
-    - name: Verify AWS credentials
-      run: |
-        aws sts get-caller-identity
-        terraform --version
-
-    - name: Terraform Init
-      run: |
-        terraform init -reconfigure
-
-    - name: Terraform Validate
-      run: terraform validate
-
-    - name: Terraform Plan
-      run: terraform plan -out=plan.out
-      continue-on-error: true
-
-    - name: Save Terraform Plan
-      if: success()
-      uses: actions/upload-artifact@v3.0.0  # Certifique-se de usar a versão mais recente
-      with:
-        name: terraform-plan
-        path: plan.out
-
-    - name: Terraform Apply
-      if: github.ref == 'refs/heads/main' && success()
-      run: terraform apply -auto-approve plan.out
-
-    - name: Save Terraform State
-      if: success()
-      uses: actions/upload-artifact@v3.0.0  # Certifique-se de usar a versão mais recente
-      with:
-        name: terraform-state
-        path: terraform.tfstate
-
-    - name: Terraform Destroy (Manual)
-      if: github.ref == 'refs/heads/main'
-      run: |
-        terraform destroy -auto-approve
-      env:
-        TERRAFORM_VAR: ${{ secrets.TERRAFORM_VAR }}
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Install AWS CLI
+        run: |
+          apk add --no-cache aws-cli curl
+      
+      - name: Configure AWS credentials
+        run: |
+          mkdir -p ~/.aws
+          
+          cat > ~/.aws/credentials << EOF
+          [${AWS_SOURCE_PROFILE}]
+          aws_access_key_id=${AWS_ACCESS_KEY_ID}
+          aws_secret_access_key=${AWS_SECRET_ACCESS_KEY}
+          aws_session_token=${AWS_SESSION_TOKEN}
+          EOF
+          
+          cat > ~/.aws/config << EOF
+          [profile terraform]
+          role_arn = ${AWS_ROLE_ARN}
+          source_profile = ${AWS_SOURCE_PROFILE}
+          region = ${AWS_REGION}
+          EOF
+          
+          export AWS_PROFILE=terraform
+          aws sts get-caller-identity
+      
+      - name: Download previous state
+        uses: actions/download-artifact@v3
+        with:
+          name: terraform-results
+          path: .
+      
+      - name: Terraform Init
+        run: terraform init -reconfigure
+      
+      - name: Terraform Destroy
+        run: |
+          echo 'Iniciando destroy'
+          ls -lah
+          terraform destroy -auto-approve
+          echo 'Destroy concluído'
+      
+      - name: Save State after Destroy
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-state-after-destroy
+          path: terraform.tfstate
+          retention-days: 1
