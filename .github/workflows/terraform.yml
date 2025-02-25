@@ -1,0 +1,77 @@
+name: Terraform Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+
+    environment:
+      name: production
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Terraform
+      uses: hashicorp/setup-terraform@v1
+      with:
+        terraform_version: 1.6.6
+
+    - name: Configure AWS credentials
+      run: |
+        mkdir -p ~/.aws
+        echo "[${{ secrets.AWS_SOURCE_PROFILE }}]" > ~/.aws/credentials
+        echo "aws_access_key_id=${{ secrets.AWS_ACCESS_KEY_ID }}" >> ~/.aws/credentials
+        echo "aws_secret_access_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> ~/.aws/credentials
+        echo "aws_session_token=${{ secrets.AWS_SESSION_TOKEN }}" >> ~/.aws/credentials
+
+        echo "[profile terraform]" > ~/.aws/config
+        echo "role_arn = ${{ secrets.AWS_ROLE_ARN }}" >> ~/.aws/config
+        echo "source_profile = ${{ secrets.AWS_SOURCE_PROFILE }}" >> ~/.aws/config
+        echo "region = us-east-1" >> ~/.aws/config
+
+    - name: Verify AWS credentials
+      run: |
+        aws sts get-caller-identity
+        terraform --version
+
+    - name: Terraform Init
+      run: |
+        terraform init -reconfigure
+
+    - name: Terraform Validate
+      run: terraform validate
+
+    - name: Terraform Plan
+      run: terraform plan -out=plan.out
+      continue-on-error: true
+
+    - name: Save Terraform Plan
+      if: success()
+      uses: actions/upload-artifact@v2
+      with:
+        name: terraform-plan
+        path: plan.out
+
+    - name: Terraform Apply
+      if: github.ref == 'refs/heads/main' && success()
+      run: terraform apply -auto-approve plan.out
+
+    - name: Save Terraform State
+      if: success()
+      uses: actions/upload-artifact@v2
+      with:
+        name: terraform-state
+        path: terraform.tfstate
+
+    - name: Terraform Destroy (Manual)
+      if: github.ref == 'refs/heads/main'
+      run: |
+        terraform destroy -auto-approve
+      env:
+        TERRAFORM_VAR: ${{ secrets.TERRAFORM_VAR }}
