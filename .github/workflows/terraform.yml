@@ -53,7 +53,7 @@ jobs:
 
     - name: Save Terraform Plan
       if: success()
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: terraform-plan
         path: plan.out
@@ -64,7 +64,7 @@ jobs:
 
     - name: Save Terraform State
       if: success()
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: terraform-state
         path: terraform.tfstate
